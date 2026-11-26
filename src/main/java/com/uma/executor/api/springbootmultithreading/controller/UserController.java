@@ -108,7 +108,7 @@ public class UserController {
      To prevent slow database queries from hanging your endpoint indefinitely, chain .orTimeout(5, TimeUnit.SECONDS) right after CompletableFuture.allOf(...)
      and check for TimeoutException inside .exceptionally(...) to return a 504 Gateway Timeout JSON response.
      */
-    @GetMapping("/usersDataByMultiThread")
+    @GetMapping("/usersDataByMultiThreadWithTimeOut")
     public CompletableFuture<ResponseEntity<?>> getAllUsersReturnDataWithTimeOut() {
 
         // 1. Trigger the 3 async calls in parallel
