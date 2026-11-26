@@ -12,7 +12,10 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 @Slf4j
 @RestController
@@ -81,10 +84,71 @@ public class UserController {
                 .exceptionally(ex -> {
                     log.error("Error fetching users asynchronously", ex);
                     return ResponseEntity.internalServerError().build();
+
+                    // Unwrap CompletionException to get the real root cause message in json format
+                    /*
+                    Two Key Details in This Update if want to use root cause message in json format
+                        • Wildcard ResponseEntity<?> and .<ResponseEntity<?>>thenApply: Because .thenApply() returns ResponseEntity<List<User>> and .exceptionally() returns ResponseEntity<Map<String, Object>>, using ResponseEntity<?> lets Java's compiler accept both return types in the same chain.
+                        • Unwrapping ex.getCause(): CompletableFuture wraps any exception thrown inside userService.getAllUser() inside a CompletionException. Checking ex.getCause() ensures your JSON "message" field displays the actual database or service error rather than a generic wrapper message.
+                     */
+                    /*Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+
+                    Map<String, Object> errorBody = Map.of(
+                            "status", 500,
+                            "error", "Internal Server Error",
+                            "message", cause.getMessage() != null ? cause.getMessage() : "Failed to fetch users"
+                    );
+
+                    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorBody);
+                    */
                 });
     }
 
+    /*
+     To prevent slow database queries from hanging your endpoint indefinitely, chain .orTimeout(5, TimeUnit.SECONDS) right after CompletableFuture.allOf(...)
+     and check for TimeoutException inside .exceptionally(...) to return a 504 Gateway Timeout JSON response.
+     */
+    @GetMapping("/usersDataByMultiThread")
+    public CompletableFuture<ResponseEntity<?>> getAllUsersReturnDataWithTimeOut() {
 
+        // 1. Trigger the 3 async calls in parallel
+        CompletableFuture<List<User>> users1 = userService.getAllUser();
+        CompletableFuture<List<User>> users2 = userService.getAllUser();
+        CompletableFuture<List<User>> users3 = userService.getAllUser();
+
+        // 2. Wait for all 3 with a 5-second timeout
+        return CompletableFuture.allOf(users1, users2, users3)
+                .orTimeout(5, TimeUnit.SECONDS)
+                .<ResponseEntity<?>>thenApply(v -> {
+                    List<User> combined = new ArrayList<>();
+                    combined.addAll(users1.join());
+                    combined.addAll(users2.join());
+                    combined.addAll(users3.join());
+                    return ResponseEntity.ok(combined);
+                })
+                .exceptionally(ex -> {
+                    // Unwrap CompletionException to inspect the real root cause
+                    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+
+                    if (cause instanceof TimeoutException) {
+                        log.warn("Timed out waiting for async user queries");
+                        Map<String, Object> timeoutBody = Map.of(
+                                "status", 504,
+                                "error", "Gateway Timeout",
+                                "message", "Fetching users took longer than 5 seconds"
+                        );
+                        return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT).body(timeoutBody);
+                    }
+
+                    log.error("Error fetching users asynchronously", cause);
+                    Map<String, Object> errorBody = Map.of(
+                            "status", 500,
+                            "error", "Internal Server Error",
+                            "message", cause.getMessage() != null ? cause.getMessage() : "Failed to fetch users"
+                    );
+                    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorBody);
+                });
+    }
 
 
 }
