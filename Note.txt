@@ -1,0 +1,12 @@
+https://www.mockaroo.com/ -  to generate mock data csv file
+
+http://localhost:8091/h2-console - access h2 db from browser view
+
+
+Note:
+
+How to Verify It Works
+
+• Check the console logs: When you hit /usersByMultiThread, you should now see log lines printing thread name: userThread-1, userThread-2, and userThread-3
+
+• Keep corePoolSize(2) if testing queuing: If you intentionally want to watch 2 threads process 3 tasks (where one thread handles two tasks back-to-back), leave corePoolSize and maxPoolSize at 2.
