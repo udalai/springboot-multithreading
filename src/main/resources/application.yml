@@ -14,5 +14,11 @@ spring:
     username: sa
     password:
 
+#Add the following properties so Tomcat/Netty also waits for active HTTP requests to finish alongside your background threads.
+  lifecycle:
+    timeout-per-shutdown-phase: 60s #Coordinate with Spring Boot's Web Server Shutdown. Enable graceful web shutdown
+
 server:
   port: 8091
+  shutdown: graceful #Coordinate with Spring Boot's Web Server Shutdown. Enable graceful web shutdown
+
