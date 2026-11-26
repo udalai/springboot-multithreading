@@ -17,6 +17,26 @@ import java.util.concurrent.Executor;
 @EnableAsync
 public class AsyncConfig implements AsyncConfigurer {
 
+//    @Bean(name = "taskExecutor")
+//    public Executor taskExecutor() {
+//        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+//        executor.setCorePoolSize(3);
+//        executor.setMaxPoolSize(5);
+//        executor.setQueueCapacity(100);
+//        executor.setThreadNamePrefix("userThread-");
+//        executor.initialize();
+//        return executor;
+//    }
+/*   • Single thread pool instance: Because taskExecutor() is annotated with @Bean inside a @Configuration class, Spring intercepts the call inside getAsyncExecutor() and returns the exact same singleton ThreadPoolTaskExecutor bean.
+           • Flexible @Async usage: You can now use either plain @Async (which uses getAsyncExecutor()) or @Async("taskExecutor") (which looks up the bean by name) across your services, and both will share the same userThread- pool.
+*/
+
+//
+//    @Override
+//    public Executor getAsyncExecutor() {
+//        return taskExecutor();
+//    }
+
     @Override
     @Bean(name = "taskExecutor")
     public Executor getAsyncExecutor() {
@@ -25,6 +45,11 @@ public class AsyncConfig implements AsyncConfigurer {
         executor.setMaxPoolSize(5);
         executor.setQueueCapacity(100);
         executor.setThreadNamePrefix("userThread-");
+
+        // Graceful shutdown settings
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(60);
+
         executor.initialize();
         return executor;
     }
