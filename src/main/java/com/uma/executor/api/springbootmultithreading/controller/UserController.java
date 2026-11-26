@@ -3,6 +3,7 @@ package com.uma.executor.api.springbootmultithreading.controller;
 import com.uma.executor.api.springbootmultithreading.entity.User;
 import com.uma.executor.api.springbootmultithreading.service.UserService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -11,8 +12,12 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
+@Slf4j
 @RestController
 @RequestMapping("/v1")
 @RequiredArgsConstructor
@@ -53,6 +58,12 @@ public class UserController {
         return ResponseEntity.status(HttpStatus.OK).build(); //comment to return CompletableFuture instead of just ResponseEntity
     }
 
+    /*
+    Important Note on CompletableFuture vs. void Methods
+    • When AsyncUncaughtExceptionHandler triggers: Spring only invokes AsyncUncaughtExceptionHandler for @Async methods that have a void return type.
+    • How CompletableFuture handles errors: When an @Async method returns a CompletableFuture (like your saveUsers and getAllUser methods), Spring wraps any thrown exception inside that CompletableFuture instead of sending it to AsyncUncaughtExceptionHandler.
+    • Handling errors on CompletableFuture: To catch exceptions from your CompletableFuture methods in your controller, attach .exceptionally() to your future chain.
+    */
     @GetMapping("/usersDataByMultiThread")
     public CompletableFuture<ResponseEntity<List<User>>> getAllUsersReturnData() {
 
@@ -63,18 +74,81 @@ public class UserController {
 
         // 2. Wait for all 3 to complete without blocking the HTTP thread
         return CompletableFuture.allOf(users1, users2, users3)
-                .thenApply(voidResult -> {
-                    // 3. Extract and combine results (join() is safe here because allOf already finished)
-                    List<User> combinedUsers = new ArrayList<>();
-                    combinedUsers.addAll(users1.join());
-                    combinedUsers.addAll(users2.join());
-                    combinedUsers.addAll(users3.join());
+                .thenApply(v -> {
+                    List<User> combined = new ArrayList<>();
+                    combined.addAll(users1.join());
+                    combined.addAll(users2.join());
+                    combined.addAll(users3.join());
+                    return ResponseEntity.ok(combined);
+                })
+                .exceptionally(ex -> {
+                    log.error("Error fetching users asynchronously", ex);
+                    return ResponseEntity.internalServerError().build();
 
-                    return ResponseEntity.ok(combinedUsers);
+                    // Unwrap CompletionException to get the real root cause message in json format
+                    /*
+                    Two Key Details in This Update if want to use root cause message in json format
+                        • Wildcard ResponseEntity<?> and .<ResponseEntity<?>>thenApply: Because .thenApply() returns ResponseEntity<List<User>> and .exceptionally() returns ResponseEntity<Map<String, Object>>, using ResponseEntity<?> lets Java's compiler accept both return types in the same chain.
+                        • Unwrapping ex.getCause(): CompletableFuture wraps any exception thrown inside userService.getAllUser() inside a CompletionException. Checking ex.getCause() ensures your JSON "message" field displays the actual database or service error rather than a generic wrapper message.
+                     */
+                    /*Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+
+                    Map<String, Object> errorBody = Map.of(
+                            "status", 500,
+                            "error", "Internal Server Error",
+                            "message", cause.getMessage() != null ? cause.getMessage() : "Failed to fetch users"
+                    );
+
+                    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorBody);
+                    */
                 });
     }
 
+    /*
+     To prevent slow database queries from hanging your endpoint indefinitely, chain .orTimeout(5, TimeUnit.SECONDS) right after CompletableFuture.allOf(...)
+     and check for TimeoutException inside .exceptionally(...) to return a 504 Gateway Timeout JSON response.
+     */
+    @GetMapping("/usersDataByMultiThreadWithTimeOut")
+    public CompletableFuture<ResponseEntity<?>> getAllUsersReturnDataWithTimeOut() {
 
+        // 1. Trigger the 3 async calls in parallel
+        CompletableFuture<List<User>> users1 = userService.getAllUser();
+        CompletableFuture<List<User>> users2 = userService.getAllUser();
+        CompletableFuture<List<User>> users3 = userService.getAllUser();
+
+        // 2. Wait for all 3 with a 5-second timeout
+        return CompletableFuture.allOf(users1, users2, users3)
+                .orTimeout(5, TimeUnit.SECONDS)
+                .<ResponseEntity<?>>thenApply(v -> {
+                    List<User> combined = new ArrayList<>();
+                    combined.addAll(users1.join());
+                    combined.addAll(users2.join());
+                    combined.addAll(users3.join());
+                    return ResponseEntity.ok(combined);
+                })
+                .exceptionally(ex -> {
+                    // Unwrap CompletionException to inspect the real root cause
+                    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+
+                    if (cause instanceof TimeoutException) {
+                        log.warn("Timed out waiting for async user queries");
+                        Map<String, Object> timeoutBody = Map.of(
+                                "status", 504,
+                                "error", "Gateway Timeout",
+                                "message", "Fetching users took longer than 5 seconds"
+                        );
+                        return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT).body(timeoutBody);
+                    }
+
+                    log.error("Error fetching users asynchronously", cause);
+                    Map<String, Object> errorBody = Map.of(
+                            "status", 500,
+                            "error", "Internal Server Error",
+                            "message", cause.getMessage() != null ? cause.getMessage() : "Failed to fetch users"
+                    );
+                    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorBody);
+                });
+    }
 
 
 }

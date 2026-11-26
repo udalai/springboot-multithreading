@@ -22,7 +22,8 @@ import java.util.stream.Collectors;
 public class UserService {
     private final UserRepository userRepository;
 
-    @Async
+    //use csvExecutor bean for csv parsing
+    @Async("csvExecutor")
     public CompletableFuture<List<User>> saveUsers(MultipartFile file) throws Exception{
         long st = System.currentTimeMillis();
         List<User> userFromCsv = parseCsvFile(file);
@@ -33,6 +34,7 @@ public class UserService {
         return CompletableFuture.completedFuture(userFromCsv);
     }
 
+    //This will call default "taskExecutor". This is same as @Async("taskExecutor") // Explicitly uses "taskExecutor"
     @Async
     public CompletableFuture<List<User>> getAllUser() {
         log.info("fetch list of users from db by ... thread name: {}", Thread.currentThread().getName());
@@ -84,5 +86,12 @@ public class UserService {
             log.error("Failed to parse CSV file {}", e.getMessage());
             throw new RuntimeException("Failed to parse CSV file{}", e);
         }
+    }
+
+    //use notificationExecutor for email, which off-load the heavy load from
+    @Async("notificationExecutor")
+    public void sendWelcomeEmail(String email) {
+        log.info("Sending email on thread: {}", Thread.currentThread().getName()); // Prints notifyThread-1
+        // ...
     }
 }

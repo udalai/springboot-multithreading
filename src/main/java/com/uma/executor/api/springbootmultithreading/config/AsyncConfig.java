@@ -1,31 +1,42 @@
 package com.uma.executor.api.springbootmultithreading.config;
 
-
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.aop.interceptor.AsyncUncaughtExceptionHandler;
-import org.springframework.context.annotation.Bean;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.AsyncConfigurer;
 import org.springframework.scheduling.annotation.EnableAsync;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.lang.reflect.Method;
+import java.util.Arrays;
 import java.util.concurrent.Executor;
 
 @Slf4j
 @Configuration
-@EnableAsync //inform Spring framework to run task in bg using threadpool concept
-public class AsyncConfig {
+@EnableAsync
+public class AsyncConfig implements AsyncConfigurer {
 
-    @Bean(name = "taskExecutor")
-    public Executor taskExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(2);      // Runs 2 tasks concurrently
-        executor.setMaxPoolSize(2);       // Scales up to 2 thread. increase to 5 to scale if queue fills
-        executor.setQueueCapacity(100);   // Holds up to 100 waiting tasks
-        executor.setThreadNamePrefix("userThread-");
-        executor.initialize();
-        return executor;
+    private final Executor taskExecutor;
+
+    //constructor or use @RequiredArgConstructor at class level and comment this constructor
+    /*
+    Why @Qualifier("taskExecutor") Matters:
+    • Avoids bean conflicts: Spring Boot often auto-configures a default applicationTaskExecutor bean. Using @Qualifier("taskExecutor") guarantees AsyncConfig grabs your custom userThread- pool rather than throwing a NoUniqueBeanDefinitionException.
+    */
+    public AsyncConfig(@Qualifier("taskExecutor") Executor taskExecutor) {
+        this.taskExecutor = taskExecutor;
     }
 
+    @Override
+    public Executor getAsyncExecutor() {
+        return taskExecutor;
+    }
 
+    @Override
+    public AsyncUncaughtExceptionHandler getAsyncUncaughtExceptionHandler() {
+        return (Throwable ex, Method method, Object... params) ->
+                log.error("Async exception in method: {} with parameters: {}",
+                        method.getName(), Arrays.toString(params), ex);
+    }
 }
+
