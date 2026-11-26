@@ -3,6 +3,7 @@ package com.uma.executor.api.springbootmultithreading.controller;
 import com.uma.executor.api.springbootmultithreading.entity.User;
 import com.uma.executor.api.springbootmultithreading.service.UserService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
+@Slf4j
 @RestController
 @RequestMapping("/v1")
 @RequiredArgsConstructor
@@ -53,6 +55,12 @@ public class UserController {
         return ResponseEntity.status(HttpStatus.OK).build(); //comment to return CompletableFuture instead of just ResponseEntity
     }
 
+    /*
+    Important Note on CompletableFuture vs. void Methods
+    • When AsyncUncaughtExceptionHandler triggers: Spring only invokes AsyncUncaughtExceptionHandler for @Async methods that have a void return type.
+    • How CompletableFuture handles errors: When an @Async method returns a CompletableFuture (like your saveUsers and getAllUser methods), Spring wraps any thrown exception inside that CompletableFuture instead of sending it to AsyncUncaughtExceptionHandler.
+    • Handling errors on CompletableFuture: To catch exceptions from your CompletableFuture methods in your controller, attach .exceptionally() to your future chain.
+    */
     @GetMapping("/usersDataByMultiThread")
     public CompletableFuture<ResponseEntity<List<User>>> getAllUsersReturnData() {
 
@@ -63,14 +71,16 @@ public class UserController {
 
         // 2. Wait for all 3 to complete without blocking the HTTP thread
         return CompletableFuture.allOf(users1, users2, users3)
-                .thenApply(voidResult -> {
-                    // 3. Extract and combine results (join() is safe here because allOf already finished)
-                    List<User> combinedUsers = new ArrayList<>();
-                    combinedUsers.addAll(users1.join());
-                    combinedUsers.addAll(users2.join());
-                    combinedUsers.addAll(users3.join());
-
-                    return ResponseEntity.ok(combinedUsers);
+                .thenApply(v -> {
+                    List<User> combined = new ArrayList<>();
+                    combined.addAll(users1.join());
+                    combined.addAll(users2.join());
+                    combined.addAll(users3.join());
+                    return ResponseEntity.ok(combined);
+                })
+                .exceptionally(ex -> {
+                    log.error("Error fetching users asynchronously", ex);
+                    return ResponseEntity.internalServerError().build();
                 });
     }
 
