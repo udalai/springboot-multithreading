@@ -17,8 +17,8 @@ import org.springframework.mock.web.MockMultipartFile;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
+import java.util.Set;
+import java.util.concurrent.*;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -150,4 +150,61 @@ class UserServiceTest {
 
         verify(userRepository, never()).saveAll(anyList());
     }
+
+    @Test
+    @DisplayName("getAllUsersInParallel() - Should execute across multiple threads concurrently and merge safely")
+    void shouldExecuteConcurrentlyAcrossMultipleThreads() throws Exception {
+        // 1. Create a real 3-thread pool for this concurrency test
+        ExecutorService realThreadPool = Executors.newFixedThreadPool(3);
+        UserService concurrentUserService = new UserService(userRepository, realThreadPool);
+
+        // Thread-safe set to capture which threads actually executed the repository calls
+        Set<String> workerThreadNames = ConcurrentHashMap.newKeySet();
+
+        try {
+            when(userRepository.count()).thenReturn(150L);
+
+            when(userRepository.findAll(any(Pageable.class))).thenAnswer(invocation -> {
+                // Record the background worker thread name
+                workerThreadNames.add(Thread.currentThread().getName());
+
+                // Simulate a 50ms DB query so threads overlap instead of one thread finishing all 3
+                Thread.sleep(50);
+
+                Pageable pageable = invocation.getArgument(0);
+                int start = (int) pageable.getOffset();
+                int end = Math.min(start + pageable.getPageSize(), 150);
+
+                List<User> chunk = IntStream.range(start, end)
+                        .mapToObj(i -> {
+                            User u = new User();
+                            u.setName("User " + (i + 1));
+                            return u;
+                        })
+                        .toList();
+
+                return new PageImpl<>(chunk, pageable, 150L);
+            });
+
+            // 2. Execute 3 pages (150 records / batchSize 50) in parallel with a 5-second safety timeout
+            List<User> combined = concurrentUserService.getAllUsersInParallel(50)
+                    .get(5, TimeUnit.SECONDS);
+
+            // 3. Verify all 150 records were merged intact with no lost updates
+            assertThat(combined).hasSize(150);
+            assertThat(combined.get(0).getName()).isEqualTo("User 1");
+            assertThat(combined.get(149).getName()).isEqualTo("User 150");
+
+            // 4. Verify multiple distinct worker threads were used (not the main test thread)
+            String testThreadName = Thread.currentThread().getName();
+            assertThat(workerThreadNames)
+                    .doesNotContain(testThreadName)
+                    .hasSizeGreaterThan(1);
+
+        } finally {
+            // 5. Always shut down the thread pool so background threads don't leak after the test
+            realThreadPool.shutdown();
+        }
+    }
+
 }
