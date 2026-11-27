@@ -156,7 +156,7 @@ public class UserController {
 
     @GetMapping("/usersDataByPages")
     public CompletableFuture<ResponseEntity<?>> getAllUsersReturnDataByBatch(
-            @RequestParam(defaultValue = "500") @Min(10) @Max(5000) int batchSize) {
+            @RequestParam(defaultValue = "500") @Min(50) @Max(5000) int batchSize) {
 
         return userService.getAllUsersInParallel(batchSize)
                 .orTimeout(10, TimeUnit.SECONDS)
