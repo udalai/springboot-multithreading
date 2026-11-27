@@ -161,7 +161,7 @@ public class UserController {
         return userService.getAllUsersInParallel(batchSize)
                 .orTimeout(10, TimeUnit.SECONDS)
                 .<ResponseEntity<?>>thenApply(ResponseEntity::ok)
-                .exceptionally(ex -> {  // we can remove this part after global exception handling
+                /*.exceptionally(ex -> {  // we can remove this part after global exception handling. The code will run but test will fail. Because your controller still has .exceptionally(...) attached, your controller caught the exception first and returned the raw cause.getMessage() ("Simulated database connection failure"), so GlobalExceptionHandler (which generates "Reference ID: ...") never ran.
                     Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
                     log.error("Error fetching users asynchronously", cause);
 
@@ -171,7 +171,8 @@ public class UserController {
                             "message", cause.getMessage() != null ? cause.getMessage() : "Failed to fetch users"
                     );
                     return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorBody);
-                });
+                })*/
+                ;
     }
 
 
