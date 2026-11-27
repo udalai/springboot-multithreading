@@ -2,11 +2,14 @@ package com.uma.executor.api.springbootmultithreading.controller;
 
 import com.uma.executor.api.springbootmultithreading.entity.User;
 import com.uma.executor.api.springbootmultithreading.service.UserService;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -21,6 +24,7 @@ import java.util.concurrent.TimeoutException;
 @RestController
 @RequestMapping("/v1")
 @RequiredArgsConstructor
+@Validated
 public class UserController {
     private final UserService userService;
 
@@ -141,6 +145,26 @@ public class UserController {
                     }
 
                     log.error("Error fetching users asynchronously", cause);
+                    Map<String, Object> errorBody = Map.of(
+                            "status", 500,
+                            "error", "Internal Server Error",
+                            "message", cause.getMessage() != null ? cause.getMessage() : "Failed to fetch users"
+                    );
+                    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorBody);
+                });
+    }
+
+    @GetMapping("/usersDataByPages")
+    public CompletableFuture<ResponseEntity<?>> getAllUsersReturnDataByBatch(
+            @RequestParam(defaultValue = "500") @Min(10) @Max(5000) int batchSize) {
+
+        return userService.getAllUsersInParallel(batchSize)
+                .orTimeout(10, TimeUnit.SECONDS)
+                .<ResponseEntity<?>>thenApply(ResponseEntity::ok)
+                .exceptionally(ex -> {  // we can remove this part after global exception handling
+                    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+                    log.error("Error fetching users asynchronously", cause);
+
                     Map<String, Object> errorBody = Map.of(
                             "status", 500,
                             "error", "Internal Server Error",
