@@ -11,6 +11,7 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -29,6 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
+@TestPropertySource(properties = "app.async.timeout-seconds=1") // Overrides 10s -> 1s for tests
 class UserControllerTest {
 
     @Autowired
@@ -128,7 +130,10 @@ class UserControllerTest {
         when(userRepository.count()).thenReturn(100L);
         when(userRepository.findAll(any(Pageable.class))).thenAnswer(invocation -> {
             // Sleep longer than your controller's 10-second .orTimeout(10, TimeUnit.SECONDS)
-            Thread.sleep(11_000);
+            //  Thread.sleep(11_000);
+
+            // Sleeps 1.5s, triggering the 1-second timeout almost immediately
+            Thread.sleep(1_500);
             return new PageImpl<>(List.of());
         });
 
@@ -139,7 +144,7 @@ class UserControllerTest {
                 .andReturn();
 
         // Tell MockMvc to wait up to 15 seconds so your 10-second .orTimeout() fires first (10s in controller)
-        mvcResult.getAsyncResult(15_000);
+        // mvcResult.getAsyncResult(15_000); // This is no more required Because @TestPropertySource(properties = "app.async.timeout-seconds=1") and in test above we set to 1.5 ms. so automatically will time out after 1 sec and throw error
 
         mockMvc.perform(asyncDispatch(mvcResult))
                 .andExpect(status().isGatewayTimeout())

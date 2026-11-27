@@ -24,3 +24,6 @@ server:
   port: 8091
   shutdown: graceful #Coordinate with Spring Boot's Web Server Shutdown. Enable graceful web shutdown
 
+app:
+  async:
+    timeout-seconds: 10
