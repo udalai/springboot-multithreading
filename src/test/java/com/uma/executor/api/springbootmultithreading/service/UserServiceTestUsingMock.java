@@ -1,14 +1,15 @@
-package com.uma.executor.api.springbootmultithreading;
+package com.uma.executor.api.springbootmultithreading.service;
 
 import com.uma.executor.api.springbootmultithreading.entity.User;
 import com.uma.executor.api.springbootmultithreading.repository.UserRepository;
-import com.uma.executor.api.springbootmultithreading.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -27,19 +28,73 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-class UserServiceTest {
+class UserServiceTestUsingMock {
 
     @Mock
     private UserRepository userRepository;
 
-    private UserService userService;
+    /*
+    Error:
+    Cannot mock/spy class com.uma.executor.api.springbootmultithreading.service.UserServiceTestUsingMock$$Lambda$551/0x000001d2da19b3d8
+Mockito cannot mock/spy because :
+ - VM does not support modification of given type
+org.mockito.exceptions.base.MockitoException: Unable to initialize @Spy annotated field 'taskExecutor'.
+
+Cannot mock/spy class com.uma.executor.api.springbootmultithreading.service.UserServiceTestUsingMock$$Lambda$551/0x000001d2da19b3d8
+Mockito cannot mock/spy because :
+ - VM does not support modification of given type
+	at org.mockito.junit.jupiter.MockitoExtension.beforeEach(MockitoExtension.java:160)
+
+    Reason:
+    Mockito cannot @Spy on a Java lambda expression (Runnable::run) because the JVM generates hidden,
+    unmodifiable synthetic classes ($$Lambda$...) at runtime. ByteBuddy (the bytecode engine behind Mockito) cannot subclass or instrument those synthetic JVM lambda classes.
+
+    Solution: below
+    @Spy
+    private Executor taskExecutor = new org.springframework.core.task.SyncTaskExecutor();
+
+    OR
+
+    @Spy
+    private Executor taskExecutor = new Executor() {
+        @Override
+        public void execute(Runnable command) {
+            command.run();
+        }
+    };
+
+    OR
 
     @BeforeEach
-    void setUp() {
-        // Direct executor runs supplyAsync tasks immediately on the calling thread for deterministic unit tests
-        Executor directExecutor = Runnable::run;
-        userService = new UserService(userRepository, directExecutor);
-    }
+    void setUp() {}
+
+     */
+//    @Spy
+//    private Executor taskExecutor = Runnable::run; // @Spy uses the real Runnable::run implementation
+
+    @Spy
+    private Executor taskExecutor = new org.springframework.core.task.SyncTaskExecutor();
+
+/*    @Spy
+    private Executor taskExecutor = new Executor() {
+        @Override
+        public void execute(Runnable command) {
+            command.run();
+        }
+    };*/
+
+
+    @InjectMocks
+    private UserService userService; // Mockito injects both userRepository and taskExecutor automatically
+
+
+
+//    @BeforeEach
+//    void setUp() {
+//        // Direct executor runs supplyAsync tasks immediately on the calling thread for deterministic unit tests
+//        Executor directExecutor = Runnable::run;
+//        userService = new UserService(userRepository, directExecutor);
+//    }
 
     @Test
     @DisplayName("saveUsers() - Should skip CSV header row and save parsed users")
@@ -151,6 +206,40 @@ class UserServiceTest {
         verify(userRepository, never()).saveAll(anyList());
     }
 
+    /*
+    This test verifies that UserService.getAllUsersInParallel(50) truly splits work across multiple background threads simultaneously and merges all results cleanly without losing data.
+
+Step 1: Set Up a Real Multi-Threaded Environment
+
+• Create a 3-thread pool: Executors.newFixedThreadPool(3) creates three real background worker threads instead of the single-threaded Runnable::run executor used in your other unit tests.
+• Instantiate UserService: Passing realThreadPool into new UserService(userRepository, realThreadPool) ensures CompletableFuture.supplyAsync(..., taskExecutor) runs its tasks on those three background threads.
+• Create a thread-safe tracker: ConcurrentHashMap.newKeySet() creates a thread-safe Set<String> to safely collect thread names from multiple workers at the exact same time without throwing a ConcurrentModificationException.
+
+Step 2: Simulate Concurrent Database Queries with Mockito
+
+• Mock the record count: when(userRepository.count()).thenReturn(150L) tells UserService there are 150 rows in the table. With batchSize = 50, UserService calculates 3 pages (150 / 50 = 3).
+• Capture each worker's name: Inside thenAnswer(...), workerThreadNames.add(Thread.currentThread().getName()) records the name of whichever background thread (such as pool-1-thread-1 or pool-1-thread-2) executes that page query.
+• Add a 50ms delay: Thread.sleep(50) simulates real database latency. Without this pause, an in-memory mock finishes in microseconds, allowing the first thread to grab and complete all 3 pages before threads 2 and 3 even start.
+• Build dynamic page data: Using pageable.getOffset() and pageable.getPageSize(), the stub generates the exact 50 users for that page (User 1 to User 50 for Page 0, User 51 to User 100 for Page 1, and User 101 to User 150 for Page 2) and wraps them in a PageImpl.
+
+Step 3: Trigger Execution and Wait Safely
+
+• Run the parallel method: concurrentUserService.getAllUsersInParallel(50) spawns all 3 CompletableFuture tasks at once.
+• Wait with a safety timeout: .get(5, TimeUnit.SECONDS) blocks the test thread until all 3 workers finish and combine their lists. If a bug or deadlock ever stalls the threads, the test fails cleanly after 5 seconds instead of hanging forever.
+
+Step 4: Assert Data Integrity and True Concurrency
+
+• Check merged data: assertThat(combined).hasSize(150) along with checking index 0 (User 1) and index 149 (User 150) proves that all 3 chunks merged in the proper page order with zero lost records.
+• Prove multiple threads ran: assertThat(workerThreadNames).doesNotContain(testThreadName).hasSizeGreaterThan(1) confirms two critical things:
+	• None of the database queries ran on the main JUnit test thread.
+	• More than one background worker thread participated concurrently.
+
+Step 5: Clean Up Resources in finally
+
+• Shut down the thread pool: realThreadPool.shutdown() inside the finally block guarantees that all 3 background threads terminate cleanly after the test finishes, even if an assertion fails.
+If you would like to run a quick comparison benchmark test or check how UserService handles empty or malformed lines inside parseCsvFile, let me know and we can add tests for those edge cases!
+
+     */
     @Test
     @DisplayName("getAllUsersInParallel() - Should execute across multiple threads concurrently and merge safely")
     void shouldExecuteConcurrentlyAcrossMultipleThreads() throws Exception {
@@ -206,5 +295,37 @@ class UserServiceTest {
             realThreadPool.shutdown();
         }
     }
+
+    /*
+        What This Verifies
+     • No silent partial data: Confirms UserService never returns incomplete data (only Pages 0 and 2) when Page 1 crashes—instead, the entire operation fails cleanly.
+     • End-to-end error propagation: Confirms the exception unwraps into CompletionException with your original message intact, which is the exact exception your GlobalExceptionHandler intercepts in the controller layer.
+     */
+    @Test
+    @DisplayName("getAllUsersInParallel() - Should fail and propagate exception if one parallel page fails")
+    void shouldPropagateExceptionWhenOnePageFails() {
+        when(userRepository.count()).thenReturn(150L);
+
+        when(userRepository.findAll(any(Pageable.class))).thenAnswer(invocation -> {
+            Pageable pageable = invocation.getArgument(0);
+
+            // Simulate Page 1 crashing while Pages 0 and 2 succeed
+            if (pageable.getPageNumber() == 1) {
+                throw new RuntimeException("DB connection lost on page 1");
+            }
+
+            User user = new User();
+            user.setName("User from page " + pageable.getPageNumber());
+            return new PageImpl<>(List.of(user), pageable, 150L);
+        });
+
+        CompletableFuture<List<User>> future = userService.getAllUsersInParallel(50);
+
+        assertThatThrownBy(future::join)
+                .isInstanceOf(CompletionException.class)
+                .hasCauseInstanceOf(RuntimeException.class)
+                .hasMessageContaining("DB connection lost on page 1");
+    }
+
 
 }

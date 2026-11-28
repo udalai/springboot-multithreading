@@ -1,4 +1,4 @@
-package com.uma.executor.api.springbootmultithreading;
+package com.uma.executor.api.springbootmultithreading.controller;
 
 import com.uma.executor.api.springbootmultithreading.entity.User;
 import com.uma.executor.api.springbootmultithreading.repository.UserRepository;
