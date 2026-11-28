@@ -1,0 +1,14 @@
+services:
+  multithreading-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: springboot-multithreading:1.0
+    container_name: springboot-multithreading-app
+    ports:
+      - "8091:8091"
+    environment:
+      APP_ASYNC_TIMEOUT_SECONDS: 10
+      SPRING_H2_CONSOLE_ENABLED: "true"
+      SPRING_H2_CONSOLE_SETTINGS_WEB_ALLOW_OTHERS: "true"
+    restart: unless-stopped
