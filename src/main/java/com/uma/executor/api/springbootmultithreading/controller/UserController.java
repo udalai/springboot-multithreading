@@ -160,12 +160,16 @@ public class UserController {
     }
 
     @GetMapping("/usersDataByPages")
-    public CompletableFuture<ResponseEntity<?>> getAllUsersReturnDataByBatch(
+    public CompletableFuture<ResponseEntity<List<User>>> getAllUsersReturnDataByBatch(
             @RequestParam(defaultValue = "500") @Min(50) @Max(5000) int batchSize) {
 
+        /*
+        Because GlobalExceptionHandler now handles TimeoutException, ConstraintViolationException,
+        and all unexpected 500 errors automatically, you can remove .exceptionally(...) from your controller completely:
+         */
         return userService.getAllUsersInParallel(batchSize)
                 .orTimeout(asyncTimeoutSeconds, TimeUnit.SECONDS)
-                .<ResponseEntity<?>>thenApply(ResponseEntity::ok)
+                .thenApply(ResponseEntity::ok)
                 /*.exceptionally(ex -> {  // we can remove this part after global exception handling. The code will run but test will fail. Because your controller still has .exceptionally(...) attached, your controller caught the exception first and returned the raw cause.getMessage() ("Simulated database connection failure"), so GlobalExceptionHandler (which generates "Reference ID: ...") never ran.
                     Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
                     log.error("Error fetching users asynchronously", cause);
