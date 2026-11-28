@@ -1,3 +1,5 @@
+initially followed from https://www.youtube.com/watch?v=3rJBLFA95Io&t=20s (Java Techie channel) and latter upgraded & improved
+
 https://www.mockaroo.com/ -  to generate mock data csv file
 
 http://localhost:8091/h2-console - access h2 db from browser view
