@@ -2,11 +2,15 @@ package com.uma.executor.api.springbootmultithreading.controller;
 
 import com.uma.executor.api.springbootmultithreading.entity.User;
 import com.uma.executor.api.springbootmultithreading.service.UserService;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -21,8 +25,13 @@ import java.util.concurrent.TimeoutException;
 @RestController
 @RequestMapping("/v1")
 @RequiredArgsConstructor
+@Validated
 public class UserController {
+
     private final UserService userService;
+
+    @Value("${app.async.timeout-seconds:10}")
+    private long asyncTimeoutSeconds;
 
     @PostMapping(value = "/users", consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity saveUsers(@RequestParam(value = "files") MultipartFile[] files) throws Exception {
@@ -148,6 +157,31 @@ public class UserController {
                     );
                     return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorBody);
                 });
+    }
+
+    @GetMapping("/usersDataByPages")
+    public CompletableFuture<ResponseEntity<List<User>>> getAllUsersReturnDataByBatch(
+            @RequestParam(defaultValue = "500") @Min(50) @Max(5000) int batchSize) {
+
+        /*
+        Because GlobalExceptionHandler now handles TimeoutException, ConstraintViolationException,
+        and all unexpected 500 errors automatically, you can remove .exceptionally(...) from your controller completely:
+         */
+        return userService.getAllUsersInParallel(batchSize)
+                .orTimeout(asyncTimeoutSeconds, TimeUnit.SECONDS)
+                .thenApply(ResponseEntity::ok)
+                /*.exceptionally(ex -> {  // we can remove this part after global exception handling. The code will run but test will fail. Because your controller still has .exceptionally(...) attached, your controller caught the exception first and returned the raw cause.getMessage() ("Simulated database connection failure"), so GlobalExceptionHandler (which generates "Reference ID: ...") never ran.
+                    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+                    log.error("Error fetching users asynchronously", cause);
+
+                    Map<String, Object> errorBody = Map.of(
+                            "status", 500,
+                            "error", "Internal Server Error",
+                            "message", cause.getMessage() != null ? cause.getMessage() : "Failed to fetch users"
+                    );
+                    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorBody);
+                })*/
+                ;
     }
 
 

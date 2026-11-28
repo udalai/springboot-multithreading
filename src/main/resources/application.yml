@@ -13,8 +13,10 @@ spring:
     driver-class-name: org.h2.Driver
     username: sa
     password:
+    hikari:
+      maximum-pool-size: 20 #default 10, If you spawn more than 10 concurrent threads that all try to read/write to H2 at the exact same time, extra threads will wait for a free connection (and may time out after 30 seconds).
 
-#Add the following properties so Tomcat/Netty also waits for active HTTP requests to finish alongside your background threads.
+  #Add the following properties so Tomcat/Netty also waits for active HTTP requests to finish alongside your background threads.
   lifecycle:
     timeout-per-shutdown-phase: 60s #Coordinate with Spring Boot's Web Server Shutdown. Enable graceful web shutdown
 
@@ -22,3 +24,6 @@ server:
   port: 8091
   shutdown: graceful #Coordinate with Spring Boot's Web Server Shutdown. Enable graceful web shutdown
 
+app:
+  async:
+    timeout-seconds: 10
